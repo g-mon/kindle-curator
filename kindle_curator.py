@@ -41,11 +41,14 @@ META_LINE_RE = re.compile(
 
 HIGHLIGHT_HEADER_RE = re.compile(
     r"""(?ix)^\s*
-    (.+?)\s+highlight
+    (?:[a-z]+\s+)?          # optional colour word (yellow, blue, etc)
+    (highlight|underline)   # main marker word
     \s*\|\s*
     (page|location)\s*:\s*([\d,]+)
-    \s*$"""
+    .*$
+"""
 )
+
 
 
 NOTE_LINE_RE = re.compile(r"(?i)^\s*note\s*:\s*(.*)$")
