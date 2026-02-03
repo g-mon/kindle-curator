@@ -13,8 +13,6 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 TRUNC_PHRASE = "Some highlights have been hidden or truncated due to export limits."
 TRUNCATION_STUB = "TRUNCATION NEEDED"
 
-
-
 @dataclass
 class Entry:
     marker_kind: Optional[str]   # "Page" or "Location" or None
