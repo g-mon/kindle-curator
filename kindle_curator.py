@@ -41,11 +41,12 @@ META_LINE_RE = re.compile(
 
 HIGHLIGHT_HEADER_RE = re.compile(
     r"""(?ix)^\s*
-    (yellow|blue|pink|orange)\s+highlight
+    (.+?)\s+highlight
     \s*\|\s*
-    (page|location)\s*:\s*(\d+)
+    (page|location)\s*:\s*([\d,]+)
     \s*$"""
 )
+
 
 NOTE_LINE_RE = re.compile(r"(?i)^\s*note\s*:\s*(.*)$")
 ELLIPSIS_END_RE = re.compile(r"(…|\.\.\.)\s*$")
@@ -110,7 +111,7 @@ def parse_kindle(raw: str) -> List[Entry]:
         if m:
             flush()
             kind = "Page" if m.group(2).lower() == "page" else "Location"
-            val = int(m.group(3))
+            val = int(m.group(3).replace(",", ""))
             current = Entry(marker_kind=kind, marker_value=val, highlight="", note=None, truncated=False)
             in_note = False
             continue
