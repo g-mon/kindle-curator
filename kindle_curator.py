@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 import re
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from io import BytesIO
 
 from docx import Document
@@ -29,7 +31,6 @@ class ChapterMark:
 
 # ---- Parsing ----
 
-# Only real junk lines. Do NOT include "Yellow highlight | Page: X" here.
 META_LINE_RE = re.compile(
     r"""(?ix)^\s*(
         options |
@@ -46,7 +47,6 @@ HIGHLIGHT_HEADER_RE = re.compile(
     \s*$"""
 )
 
-# Dates like: "January, 1st 1925" or "January 1st 1925"
 DATE_STAMP_RE = re.compile(
     r"""(?ix)^\s*
     (january|february|march|april|may|june|july|august|september|october|november|december)
@@ -61,14 +61,8 @@ ELLIPSIS_END_RE = re.compile(r"(…|\.\.\.)\s*$")
 
 
 def _clean_lines(raw: str) -> List[str]:
-    """
-    Normalises a raw pasted Kindle export.
-    IMPORTANT: We keep highlight header lines (e.g. "Yellow highlight | Page: 1")
-    because they define entry boundaries and provide markers.
-    """
     out: List[str] = []
     for line in raw.splitlines():
-        # normalise invisible characters
         line = line.replace("\ufeff", "").replace("\u00a0", " ")
         l = line.strip()
 
@@ -80,24 +74,12 @@ def _clean_lines(raw: str) -> List[str]:
         if re.match(r"(?i)^\s*\d+\s+highlights?\s*\|\s*\d+\s+notes?\s*$", l):
             continue
 
-        # keep everything else (metadata filtered later in parse loop too)
         out.append(l)
 
     return out
 
 
 def parse_kindle(raw: str) -> List[Entry]:
-    """
-    State-machine parser:
-    - New entry begins at a "Colour highlight | Page/Location: N" header line.
-    - "Options", "Added on ..." and date stamps are skipped.
-    - "Note:" starts a note; subsequent non-header lines are treated as note continuation
-      until the next highlight header.
-    - Truncation is flagged if:
-        - TRUNC_PHRASE appears as its own line OR inside highlight text
-        - highlight ends with ellipsis
-      TRUNC_PHRASE is removed from highlight text.
-    """
     lines = _clean_lines(raw)
 
     entries: List[Entry] = []
@@ -172,8 +154,6 @@ def parse_kindle(raw: str) -> List[Entry]:
             if note_text:
                 current.note = (current.note + "\n" if current.note else "") + note_text
             else:
-                # still enter note mode even if the first line is empty,
-                # in case continuation lines follow
                 current.note = current.note or ""
             in_note = True
             continue
@@ -182,7 +162,6 @@ def parse_kindle(raw: str) -> List[Entry]:
         if current is not None:
             current.highlight = (current.highlight + "\n" if current.highlight else "") + l
         else:
-            # Ignore anything before the first highlight header
             continue
 
     flush()
@@ -295,4 +274,3 @@ def build_docx(
     bio = BytesIO()
     doc.save(bio)
     return bio.getvalue()
-
