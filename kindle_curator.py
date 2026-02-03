@@ -255,16 +255,29 @@ def build_docx(
 
         highlight_text = (e.highlight or "").strip()
 
-        if e.truncated:
+                highlight_text = (e.highlight or "").strip()
+
+        # Decide whether truncation is still unresolved
+        ends_with_ellipsis = highlight_text.endswith(("…", "..."))
+        contains_trunc_phrase = TRUNC_PHRASE.lower() in highlight_text.lower()
+        unresolved_truncation = e.truncated and (not highlight_text or ends_with_ellipsis or contains_trunc_phrase)
+
+        # If unresolved, append/insert stub; if resolved, leave text alone
+        if unresolved_truncation:
+            # remove phrase if it's still embedded
+            if contains_trunc_phrase:
+                highlight_text = re.sub(
+                    re.escape(TRUNC_PHRASE), "", highlight_text, flags=re.IGNORECASE
+                ).strip()
+
             if highlight_text:
-                # If highlight exists, append stub after ellipsis or at end
                 if highlight_text.endswith(("…", "...")):
                     highlight_text = f"{highlight_text} {TRUNCATION_STUB}"
                 else:
                     highlight_text = f"{highlight_text} … {TRUNCATION_STUB}"
             else:
-                # Completely empty highlight → stub only
                 highlight_text = TRUNCATION_STUB
+
 
         _add_run(ph, highlight_text, font_name, 10)
 
