@@ -11,7 +11,9 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 
 TRUNC_PHRASE = "Some highlights have been hidden or truncated due to export limits."
+
 TRUNCATION_STUB = "TRUNCATION NEEDED"
+
 
 @dataclass
 class Entry:
@@ -41,13 +43,14 @@ META_LINE_RE = re.compile(
 
 HIGHLIGHT_HEADER_RE = re.compile(
     r"""(?ix)^\s*
-    (?:[a-z]+\s+)?          # optional colour word (yellow, blue, etc)
-    (highlight|underline)   # main marker word
-    \s*\|\s*
+    (?:[a-z]+\s+)?              # optional colour word
+    (highlight|underline)\s*     # highlight / underline
+    \|\s*
     (page|location)\s*:\s*([\d,]+)
-    .*$
-"""
+    \s*.*$
+    """
 )
+
 
 
 
