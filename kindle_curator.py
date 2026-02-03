@@ -32,17 +32,40 @@ META_LINE_RE = re.compile(
     r"""(?ix)^\s*(
         options |
         added\s+on\s+.* |
-        (?:yellow|blue|pink|orange)\s+highlight.* |
-        highlight\s*\|\s*(?:page|location)\s*:\s*\d+.* |
-        note\s*\|\s*(?:page|location)\s*:\s*\d+.* |
         =+\s*$
     )\s*$"""
+
 )
+
+HIGHLIGHT_HEADER_RE = re.compile(
+    r"""(?ix)^\s*
+    (yellow|blue|pink|orange)\s+highlight
+    \s*\|\s*
+    (page|location)\s*:\s*(\d+)
+    \s*$"""
+)
+
+# Dates like: "January, 1st 1925" or "January 1st 1925"
+DATE_STAMP_RE = re.compile(
+    r"""(?ix)^\s*
+    (january|february|march|april|may|june|july|august|september|october|november|december)
+    \s*,?\s*
+    \d{1,2}(?:st|nd|rd|th)?
+    \s+\d{4}
+    \s*$"""
+)
+
+NOTE_LINE_RE = re.compile(r"(?i)^\s*note\s*:\s*(.*)$")
+ELLIPSIS_END_RE = re.compile(r"(…|\.\.\.)\s*$")
+TRUNC_PHRASE = "Some highlights have been hidden or truncated due to export limits."
+
 
 PAGE_RE = re.compile(r"(?i)\bpage\s*[:#]?\s*(\d+)\b")
 LOC_RE  = re.compile(r"(?i)\blocation\s*[:#]?\s*(\d+)\b")
 NOTE_PREFIX_RE = re.compile(r"(?i)^\s*note\s*[:\-]\s*")
 
+def _contains_trunc_phrase(text: str) -> bool:
+    return TRUNC_PHRASE.lower() in (text or "").lower()
 
 def _clean_lines(raw: str) -> List[str]:
     out = []
@@ -92,37 +115,91 @@ def _strip_marker_fragments(text: str) -> str:
 
 def parse_kindle(raw: str) -> List[Entry]:
     lines = _clean_lines(raw)
-    blocks = _split_blocks(lines)
 
     entries: List[Entry] = []
-    last_marker: Tuple[Optional[str], Optional[int]] = (None, None)
+    current: Optional[Entry] = None
 
-    for block in blocks:
-        last_marker = _marker_from_block(block, last_marker)
-        kind, val = last_marker
+    def flush():
+        nonlocal current
+        if not current:
+            return
 
-        note = None
-        highlight_lines: List[str] = []
+        # Strip truncation phrase from highlight if present
+        if TRUNC_PHRASE.lower() in current.highlight.lower():
+            current.truncated = True
+            current.highlight = re.sub(
+                re.escape(TRUNC_PHRASE), "", current.highlight, flags=re.IGNORECASE
+            ).strip()
 
-        for l in block:
-            l2 = _strip_marker_fragments(l)
-            if NOTE_PREFIX_RE.match(l2):
-                note = NOTE_PREFIX_RE.sub("", l2).strip()
-            else:
-                highlight_lines.append(l2)
+        # If highlight ends with ellipsis, likely truncated
+        if ELLIPSIS_END_RE.search(current.highlight.strip() or ""):
+            current.truncated = True
 
-        highlight = "\n".join([h for h in highlight_lines if h]).strip()
-        if not highlight:
+        # Keep entry if it has highlight text OR is flagged truncated (even if empty)
+        if current.highlight.strip() or current.truncated:
+            entries.append(current)
+
+        current = None
+
+    for line in lines:
+        l = line.strip()
+
+        if not l:
             continue
 
-        truncated = TRUNC_PHRASE.lower() in highlight.lower()
-        if truncated:
-            # Remove the truncation phrase from the highlight text for output
-            highlight = re.sub(re.escape(TRUNC_PHRASE), "", highlight, flags=re.IGNORECASE).strip()
+        # Start of a new highlight entry
+        m = HIGHLIGHT_HEADER_RE.match(l)
+        if m:
+            flush()
+            kind = "Page" if m.group(2).lower() == "page" else "Location"
+            val = int(m.group(3))
+            current = Entry(
+                marker_kind=kind,
+                marker_value=val,
+                highlight="",
+                note=None,
+                truncated=False
+            )
+            continue
 
-        entries.append(Entry(kind, val, highlight, note=note, truncated=truncated))
+        # Ignore junk metadata lines
+        if META_LINE_RE.match(l):
+            continue
 
+        # Remove standalone date stamps like "January, 1st 1925"
+        if DATE_STAMP_RE.match(l):
+            continue
+
+        # If we see the truncation phrase as its own line, flag the current entry and skip the line
+        if current is not None and TRUNC_PHRASE.lower() in l.lower():
+            current.truncated = True
+            continue
+
+        # Notes attach to current entry
+        nm = NOTE_LINE_RE.match(l)
+        if nm and current is not None:
+            note_text = nm.group(1).strip()
+            if note_text:
+                if current.note:
+                    current.note += "\n" + note_text
+                else:
+                    current.note = note_text
+            continue
+
+        # Otherwise it's highlight text
+        if current is not None:
+            if current.highlight:
+                current.highlight += "\n" + l
+            else:
+                current.highlight = l
+        else:
+            # ignore anything before the first highlight header
+            continue
+
+    flush()
     return entries
+
+
 
 
 # ---- DOCX generation ----
