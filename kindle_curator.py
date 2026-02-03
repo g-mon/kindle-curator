@@ -57,6 +57,7 @@ DATE_STAMP_RE = re.compile(
 
 NOTE_LINE_RE = re.compile(r"(?i)^\s*note\s*:\s*(.*)$")
 ELLIPSIS_END_RE = re.compile(r"(…|\.\.\.)\s*$")
+
 TRUNC_PHRASE = "Some highlights have been hidden or truncated due to export limits."
 
 
@@ -70,15 +71,25 @@ def _contains_trunc_phrase(text: str) -> bool:
 def _clean_lines(raw: str) -> List[str]:
     out = []
     for line in raw.splitlines():
+        # normalise invisible characters Kindle exports sometimes include
+        line = line.replace("\ufeff", "").replace("\u00a0", " ")
         l = line.strip()
+
         if not l:
             out.append("")
             continue
-        # IMPORTANT: do NOT strip TRUNC_PHRASE here; it may appear inside highlights
+
+        # skip the summary line like "58 Highlights | 8 Notes"
+        if re.match(r"(?i)^\s*\d+\s+highlights?\s*\|\s*\d+\s+notes?\s*$", l):
+            continue
+
+        # skip "Options", "Added on...", etc.
         if META_LINE_RE.match(l):
             continue
+
         out.append(l)
     return out
+
 
 
 def _split_blocks(lines: List[str]) -> List[List[str]]:
@@ -125,18 +136,18 @@ def parse_kindle(raw: str) -> List[Entry]:
             return
 
         # Strip truncation phrase from highlight if present
-        if TRUNC_PHRASE.lower() in current.highlight.lower():
+        if TRUNC_PHRASE.lower() in (current.highlight or "").lower():
             current.truncated = True
             current.highlight = re.sub(
                 re.escape(TRUNC_PHRASE), "", current.highlight, flags=re.IGNORECASE
             ).strip()
 
-        # If highlight ends with ellipsis, likely truncated
-        if ELLIPSIS_END_RE.search(current.highlight.strip() or ""):
+        # Ellipsis at end is a strong truncation signal
+        if ELLIPSIS_END_RE.search((current.highlight or "").strip()):
             current.truncated = True
 
         # Keep entry if it has highlight text OR is flagged truncated (even if empty)
-        if current.highlight.strip() or current.truncated:
+        if (current.highlight and current.highlight.strip()) or current.truncated:
             entries.append(current)
 
         current = None
@@ -147,7 +158,7 @@ def parse_kindle(raw: str) -> List[Entry]:
         if not l:
             continue
 
-        # Start of a new highlight entry
+        # Start of a new highlight entry (THIS is the crucial boundary)
         m = HIGHLIGHT_HEADER_RE.match(l)
         if m:
             flush()
@@ -162,42 +173,33 @@ def parse_kindle(raw: str) -> List[Entry]:
             )
             continue
 
-        # Ignore junk metadata lines
-        if META_LINE_RE.match(l):
-            continue
-
         # Remove standalone date stamps like "January, 1st 1925"
         if DATE_STAMP_RE.match(l):
             continue
 
-        # If we see the truncation phrase as its own line, flag the current entry and skip the line
+        # If the truncation phrase appears on its own line, flag current entry
         if current is not None and TRUNC_PHRASE.lower() in l.lower():
             current.truncated = True
             continue
 
-        # Notes attach to current entry
+        # Note lines attach to the current entry
         nm = NOTE_LINE_RE.match(l)
         if nm and current is not None:
             note_text = nm.group(1).strip()
             if note_text:
-                if current.note:
-                    current.note += "\n" + note_text
-                else:
-                    current.note = note_text
+                current.note = (current.note + "\n" if current.note else "") + note_text
             continue
 
         # Otherwise it's highlight text
         if current is not None:
-            if current.highlight:
-                current.highlight += "\n" + l
-            else:
-                current.highlight = l
+            current.highlight = (current.highlight + "\n" if current.highlight else "") + l
         else:
-            # ignore anything before the first highlight header
+            # Ignore anything before the first highlight header
             continue
 
     flush()
     return entries
+
 
 
 
