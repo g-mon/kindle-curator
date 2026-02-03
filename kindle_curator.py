@@ -246,25 +246,24 @@ def build_docx(
             _set_para_base(pm)
             _add_run(pm, f"{e.marker_kind} {e.marker_value}", font_name, 10, bold=True)
 
-# Highlight (10pt) with truncation safety stub
-ph = doc.add_paragraph()
-_set_para_base(ph)
+        # Highlight (10pt) with truncation safety stub
+        ph = doc.add_paragraph()
+        _set_para_base(ph)
 
-highlight_text = (e.highlight or "").strip()
+        highlight_text = (e.highlight or "").strip()
 
-if e.truncated:
-    if highlight_text:
-        # If highlight exists, append stub after ellipsis or at end
-        if highlight_text.endswith(("…", "...")):
-            highlight_text = f"{highlight_text} {TRUNCATION_STUB}"
-        else:
-            highlight_text = f"{highlight_text} … {TRUNCATION_STUB}"
-    else:
-        # Completely empty highlight → stub only
-        highlight_text = TRUNCATION_STUB
+        if e.truncated:
+            if highlight_text:
+                # If highlight exists, append stub after ellipsis or at end
+                if highlight_text.endswith(("…", "...")):
+                    highlight_text = f"{highlight_text} {TRUNCATION_STUB}"
+                else:
+                    highlight_text = f"{highlight_text} … {TRUNCATION_STUB}"
+            else:
+                # Completely empty highlight → stub only
+                highlight_text = TRUNCATION_STUB
 
-_add_run(ph, highlight_text, font_name, 10)
-
+        _add_run(ph, highlight_text, font_name, 10)
 
         # Note: bullet, NO INDENT, 10pt; only "Note:" bold
         if e.note:
