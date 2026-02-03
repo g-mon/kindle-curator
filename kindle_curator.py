@@ -1,6 +1,6 @@
 import re
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import List, Optional
 from io import BytesIO
 
 from docx import Document
@@ -28,13 +28,14 @@ class ChapterMark:
 
 
 # ---- Parsing ----
+
+# Only real junk lines. Do NOT include "Yellow highlight | Page: X" here.
 META_LINE_RE = re.compile(
     r"""(?ix)^\s*(
         options |
         added\s+on\s+.* |
         =+\s*$
     )\s*$"""
-
 )
 
 HIGHLIGHT_HEADER_RE = re.compile(
@@ -58,20 +59,16 @@ DATE_STAMP_RE = re.compile(
 NOTE_LINE_RE = re.compile(r"(?i)^\s*note\s*:\s*(.*)$")
 ELLIPSIS_END_RE = re.compile(r"(…|\.\.\.)\s*$")
 
-TRUNC_PHRASE = "Some highlights have been hidden or truncated due to export limits."
-
-
-PAGE_RE = re.compile(r"(?i)\bpage\s*[:#]?\s*(\d+)\b")
-LOC_RE  = re.compile(r"(?i)\blocation\s*[:#]?\s*(\d+)\b")
-NOTE_PREFIX_RE = re.compile(r"(?i)^\s*note\s*[:\-]\s*")
-
-def _contains_trunc_phrase(text: str) -> bool:
-    return TRUNC_PHRASE.lower() in (text or "").lower()
 
 def _clean_lines(raw: str) -> List[str]:
-    out = []
+    """
+    Normalises a raw pasted Kindle export.
+    IMPORTANT: We keep highlight header lines (e.g. "Yellow highlight | Page: 1")
+    because they define entry boundaries and provide markers.
+    """
+    out: List[str] = []
     for line in raw.splitlines():
-        # normalise invisible characters Kindle exports sometimes include
+        # normalise invisible characters
         line = line.replace("\ufeff", "").replace("\u00a0", " ")
         l = line.strip()
 
@@ -79,52 +76,28 @@ def _clean_lines(raw: str) -> List[str]:
             out.append("")
             continue
 
-        # skip the summary line like "58 Highlights | 8 Notes"
+        # skip summary line like "58 Highlights | 8 Notes"
         if re.match(r"(?i)^\s*\d+\s+highlights?\s*\|\s*\d+\s+notes?\s*$", l):
             continue
 
-        # skip "Options", "Added on...", etc.
-        if META_LINE_RE.match(l):
-            continue
-
+        # keep everything else (metadata filtered later in parse loop too)
         out.append(l)
+
     return out
 
 
-
-def _split_blocks(lines: List[str]) -> List[List[str]]:
-    blocks, buf = [], []
-    for l in lines:
-        if l == "":
-            if buf:
-                blocks.append(buf)
-                buf = []
-        else:
-            buf.append(l)
-    if buf:
-        blocks.append(buf)
-    return blocks
-
-
-def _marker_from_block(block: List[str], last_marker: Tuple[Optional[str], Optional[int]]):
-    kind, val = last_marker
-    for l in block:
-        m = PAGE_RE.search(l)
-        if m:
-            return ("Page", int(m.group(1)))
-        m = LOC_RE.search(l)
-        if m:
-            return ("Location", int(m.group(1)))
-    return (kind, val)
-
-
-def _strip_marker_fragments(text: str) -> str:
-    text = PAGE_RE.sub("", text)
-    text = LOC_RE.sub("", text)
-    return text.strip(" -|")
-
-
 def parse_kindle(raw: str) -> List[Entry]:
+    """
+    State-machine parser:
+    - New entry begins at a "Colour highlight | Page/Location: N" header line.
+    - "Options", "Added on ..." and date stamps are skipped.
+    - "Note:" starts a note; subsequent non-header lines are treated as note continuation
+      until the next highlight header.
+    - Truncation is flagged if:
+        - TRUNC_PHRASE appears as its own line OR inside highlight text
+        - highlight ends with ellipsis
+      TRUNC_PHRASE is removed from highlight text.
+    """
     lines = _clean_lines(raw)
 
     entries: List[Entry] = []
@@ -136,22 +109,88 @@ def parse_kindle(raw: str) -> List[Entry]:
         if not current:
             return
 
-        # Strip truncation phrase from highlight if present
+        # If trunc phrase got embedded in highlight text, flag + strip
         if TRUNC_PHRASE.lower() in (current.highlight or "").lower():
             current.truncated = True
             current.highlight = re.sub(
                 re.escape(TRUNC_PHRASE), "", current.highlight, flags=re.IGNORECASE
             ).strip()
 
-        # Ellipsis at end is a strong truncation signal
-        if ELLIP
+        # Ellipsis ending = likely truncated
+        if ELLIPSIS_END_RE.search((current.highlight or "").strip()):
+            current.truncated = True
 
+        # Keep entry if it has highlight OR is flagged truncated (even if empty)
+        if (current.highlight and current.highlight.strip()) or current.truncated:
+            entries.append(current)
 
+        current = None
+        in_note = False
 
+    for line in lines:
+        l = line.strip()
+        if not l:
+            continue
 
+        # Start of a new highlight entry
+        m = HIGHLIGHT_HEADER_RE.match(l)
+        if m:
+            flush()
+            kind = "Page" if m.group(2).lower() == "page" else "Location"
+            val = int(m.group(3))
+            current = Entry(marker_kind=kind, marker_value=val, highlight="", note=None, truncated=False)
+            in_note = False
+            continue
+
+        # Ignore metadata/date stamps
+        if META_LINE_RE.match(l):
+            continue
+        if DATE_STAMP_RE.match(l):
+            continue
+
+        # Standalone truncation phrase line
+        if current is not None and TRUNC_PHRASE.lower() in l.lower():
+            current.truncated = True
+            continue
+
+        # If we're in a note, everything continues as note until next header
+        if current is not None and in_note:
+            nm2 = NOTE_LINE_RE.match(l)
+            if nm2:
+                extra = nm2.group(1).strip()
+                if extra:
+                    current.note = (current.note + "\n" if current.note else "") + extra
+                continue
+
+            current.note = (current.note + "\n" if current.note else "") + l
+            continue
+
+        # Start of a note
+        nm = NOTE_LINE_RE.match(l)
+        if nm and current is not None:
+            note_text = nm.group(1).strip()
+            if note_text:
+                current.note = (current.note + "\n" if current.note else "") + note_text
+            else:
+                # still enter note mode even if the first line is empty,
+                # in case continuation lines follow
+                current.note = current.note or ""
+            in_note = True
+            continue
+
+        # Otherwise it's highlight text
+        if current is not None:
+            current.highlight = (current.highlight + "\n" if current.highlight else "") + l
+        else:
+            # Ignore anything before the first highlight header
+            continue
+
+    flush()
+    return entries
 
 
 # ---- DOCX generation ----
+
 def _set_para_base(p):
     p.alignment = WD_ALIGN_PARAGRAPH.LEFT
     pf = p.paragraph_format
@@ -218,7 +257,6 @@ def build_docx(
 
         i = next_idx[kind]
         lst = chapters_by_kind[kind]
-        # Insert all chapter headings whose threshold is <= current marker value
         while i < len(lst) and val >= lst[i].marker_value:
             p_ch = doc.add_paragraph()
             _set_para_base(p_ch)
@@ -257,3 +295,4 @@ def build_docx(
     bio = BytesIO()
     doc.save(bio)
     return bio.getvalue()
+
