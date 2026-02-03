@@ -129,9 +129,10 @@ def parse_kindle(raw: str) -> List[Entry]:
 
     entries: List[Entry] = []
     current: Optional[Entry] = None
+    in_note = False
 
     def flush():
-        nonlocal current
+        nonlocal current, in_note
         if not current:
             return
 
@@ -143,62 +144,8 @@ def parse_kindle(raw: str) -> List[Entry]:
             ).strip()
 
         # Ellipsis at end is a strong truncation signal
-        if ELLIPSIS_END_RE.search((current.highlight or "").strip()):
-            current.truncated = True
+        if ELLIP
 
-        # Keep entry if it has highlight text OR is flagged truncated (even if empty)
-        if (current.highlight and current.highlight.strip()) or current.truncated:
-            entries.append(current)
-
-        current = None
-
-    for line in lines:
-        l = line.strip()
-
-        if not l:
-            continue
-
-        # Start of a new highlight entry (THIS is the crucial boundary)
-        m = HIGHLIGHT_HEADER_RE.match(l)
-        if m:
-            flush()
-            kind = "Page" if m.group(2).lower() == "page" else "Location"
-            val = int(m.group(3))
-            current = Entry(
-                marker_kind=kind,
-                marker_value=val,
-                highlight="",
-                note=None,
-                truncated=False
-            )
-            continue
-
-        # Remove standalone date stamps like "January, 1st 1925"
-        if DATE_STAMP_RE.match(l):
-            continue
-
-        # If the truncation phrase appears on its own line, flag current entry
-        if current is not None and TRUNC_PHRASE.lower() in l.lower():
-            current.truncated = True
-            continue
-
-        # Note lines attach to the current entry
-        nm = NOTE_LINE_RE.match(l)
-        if nm and current is not None:
-            note_text = nm.group(1).strip()
-            if note_text:
-                current.note = (current.note + "\n" if current.note else "") + note_text
-            continue
-
-        # Otherwise it's highlight text
-        if current is not None:
-            current.highlight = (current.highlight + "\n" if current.highlight else "") + l
-        else:
-            # Ignore anything before the first highlight header
-            continue
-
-    flush()
-    return entries
 
 
 
