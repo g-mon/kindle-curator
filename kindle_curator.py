@@ -47,15 +47,6 @@ HIGHLIGHT_HEADER_RE = re.compile(
     \s*$"""
 )
 
-DATE_STAMP_RE = re.compile(
-    r"""(?ix)^\s*
-    (january|february|march|april|may|june|july|august|september|october|november|december)
-    \s*,?\s*
-    \d{1,2}(?:st|nd|rd|th)?
-    \s+\d{4}
-    \s*$"""
-)
-
 NOTE_LINE_RE = re.compile(r"(?i)^\s*note\s*:\s*(.*)$")
 ELLIPSIS_END_RE = re.compile(r"(…|\.\.\.)\s*$")
 
@@ -126,8 +117,6 @@ def parse_kindle(raw: str) -> List[Entry]:
 
         # Ignore metadata/date stamps
         if META_LINE_RE.match(l):
-            continue
-        if DATE_STAMP_RE.match(l):
             continue
 
         # Standalone truncation phrase line
