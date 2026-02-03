@@ -2,7 +2,7 @@ import re
 import streamlit as st
 import pandas as pd
 
-from kindle_curator import parse_kindle, build_docx, ChapterMark, Entry
+from kindle_curator import parse_kindle, build_docx, ChapterMark, Entry, TRUNC_PHRASE
 
 
 st.set_page_config(page_title="Kindle Document Curator", layout="centered")
@@ -35,10 +35,14 @@ if "chapters_df" not in st.session_state:
 if st.button("Parse"):
     st.session_state.entries = parse_kindle(raw)
     if not st.session_state.entries:
-        st.error("No highlights found after removing metadata.")
+        st.error("No highlights found after parsing. (Check the input contains lines like 'Yellow highlight | Page: X').")
     else:
         trunc_count = sum(1 for e in st.session_state.entries if e.truncated)
-        st.success(f"Parsed {len(st.session_state.entries)} entries. Flagged {trunc_count} as truncated (export limits).")
+        note_count = sum(1 for e in st.session_state.entries if e.note and e.note.strip())
+        st.success(
+            f"Parsed {len(st.session_state.entries)} entries. "
+            f"Notes: {note_count}. Truncations flagged: {trunc_count}."
+        )
 
 entries: list[Entry] = st.session_state.entries
 
@@ -71,18 +75,61 @@ if entries:
         hide_index=True,
     )
 
-    st.subheader("Review & fix entries")
-    for idx, e in enumerate(entries):
-        marker = f"{e.marker_kind} {e.marker_value}" if e.marker_kind and e.marker_value is not None else "No marker"
-        flag = " ⚠ truncated (replace text)" if e.truncated else ""
-        with st.expander(f"{idx+1}. {marker}{flag}", expanded=bool(e.truncated)):
-            e.highlight = st.text_area("Highlight", value=e.highlight, key=f"h{idx}", height=120).strip()
-            e.note = st.text_area("Note (optional)", value=e.note or "", key=f"n{idx}", height=70).strip() or None
+    # --- Quick sanity counts ---
+    total_entries = len(entries)
+    notes_count = sum(1 for e in entries if e.note and e.note.strip())
+    trunc_count = sum(1 for e in entries if e.truncated)
 
-            # Re-flag truncation if phrase still present (you can remove it by replacing the text)
-            e.truncated = ("some highlights have been hidden or truncated due to export limits" in e.highlight.lower())
-            if e.truncated:
-                st.warning("This highlight still contains the truncation message — replace it with the full text.")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Entries", total_entries)
+    c2.metric("Notes", notes_count)
+    c3.metric("Truncations", trunc_count)
+
+    # --- Filters ---
+    show_only_truncated = st.checkbox("Show only truncated entries", value=False)
+    show_only_with_notes = st.checkbox("Show only entries with notes", value=False)
+
+    filtered_entries = entries
+    if show_only_truncated:
+        filtered_entries = [e for e in filtered_entries if e.truncated]
+    if show_only_with_notes:
+        filtered_entries = [e for e in filtered_entries if e.note and e.note.strip()]
+
+    st.subheader("Review & fix entries")
+
+    # Helpful prompt if filters hide everything
+    if not filtered_entries:
+        st.info("No entries match the current filters.")
+    else:
+        for idx, e in enumerate(filtered_entries):
+            marker = f"{e.marker_kind} {e.marker_value}" if e.marker_kind and e.marker_value is not None else "No marker"
+            trunc_flag = " ⚠ truncated" if e.truncated else ""
+            note_flag = " 📝 note" if (e.note and e.note.strip()) else ""
+
+            # Stable key so toggling filters doesn't scramble text areas
+            stable_id = f"{e.marker_kind}-{e.marker_value}-{idx}"
+
+            with st.expander(f"{idx+1}. {marker}{trunc_flag}{note_flag}", expanded=bool(e.truncated)):
+                e.highlight = st.text_area(
+                    "Highlight (edit this)",
+                    value=e.highlight,
+                    key=f"h-{stable_id}",
+                    height=420 if e.truncated else 260
+                ).strip()
+
+                e.note = st.text_area(
+                    "Note (optional)",
+                    value=e.note or "",
+                    key=f"n-{stable_id}",
+                    height=140
+                ).strip() or None
+
+                # Re-flag truncation if phrase is still present (you can remove it by replacing the text)
+                if TRUNC_PHRASE.lower() in e.highlight.lower():
+                    e.truncated = True
+                    st.warning("This highlight still contains the truncation message — replace it with the full text.")
+                # If user replaces the text and removes the phrase, we leave truncation flag as-is
+                # (because it may still be truncated even without the phrase). You can manually clear it if desired.
 
     st.divider()
 
@@ -106,7 +153,7 @@ if entries:
         final_title = doc_title.strip() or "Kindle Highlights"
         docx_bytes = build_docx(
             title=final_title,
-            entries=entries,
+            entries=entries,  # always export full set, not filtered
             reading_note=st.session_state.reading_note,
             chapters=chapters,
             font_name=font_choice,
