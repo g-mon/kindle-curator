@@ -51,6 +51,13 @@ HIGHLIGHT_HEADER_RE = re.compile(
     """
 )
 
+NOTE_HEADER_RE = re.compile(
+    r"""(?ix)^\s*
+    note\s*\|\s*
+    (page|location)\s*:\s*([\d,]+)
+    \s*.*$
+    """
+)
 
 
 
@@ -153,6 +160,23 @@ def parse_kindle(raw: str) -> List[Entry]:
                 current.note = current.note or ""
             in_note = True
             continue
+
+        # Standalone Kindle note header (e.g. "Note | Location: 2081")
+        nmh = NOTE_HEADER_RE.match(l)
+        if nmh:
+            flush()
+            kind = "Page" if nmh.group(1).lower() == "page" else "Location"
+            val = int(nmh.group(2).replace(",", ""))
+            current = Entry(
+                marker_kind=kind,
+                marker_value=val,
+                highlight="",
+                note="",
+                truncated=False,
+            )
+            in_note = True
+            continue
+
 
         # Otherwise it's highlight text
         if current is not None:
