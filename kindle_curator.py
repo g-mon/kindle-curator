@@ -108,8 +108,13 @@ def parse_kindle(raw: str) -> List[Entry]:
             current.truncated = True
 
         # Keep entry if it has highlight OR is flagged truncated (even if empty)
-        if (current.highlight and current.highlight.strip()) or current.truncated:
-            entries.append(current)
+        if (
+            (current.highlight and current.highlight.strip())
+            or (current.note and current.note.strip())
+            or current.truncated
+        ):
+    entries.append(current)
+
 
         current = None
         in_note = False
@@ -278,8 +283,6 @@ def build_docx(
         _set_para_base(ph)
 
         highlight_text = (e.highlight or "").strip()
-
-                highlight_text = (e.highlight or "").strip()
 
         # Decide whether truncation is still unresolved
         ends_with_ellipsis = highlight_text.endswith(("…", "..."))
