@@ -113,7 +113,7 @@ def parse_kindle(raw: str) -> List[Entry]:
             or (current.note and current.note.strip())
             or current.truncated
         ):
-    entries.append(current)
+            entries.append(current)
 
 
         current = None
@@ -155,17 +155,6 @@ def parse_kindle(raw: str) -> List[Entry]:
             current.note = (current.note + "\n" if current.note else "") + l
             continue
 
-        # Start of a note
-        nm = NOTE_LINE_RE.match(l)
-        if nm and current is not None:
-            note_text = nm.group(1).strip()
-            if note_text:
-                current.note = (current.note + "\n" if current.note else "") + note_text
-            else:
-                current.note = current.note or ""
-            in_note = True
-            continue
-
         # Standalone Kindle note header (e.g. "Note | Location: 2081")
         nmh = NOTE_HEADER_RE.match(l)
         if nmh:
@@ -181,6 +170,19 @@ def parse_kindle(raw: str) -> List[Entry]:
             )
             in_note = True
             continue
+        
+        # Start of a note
+        nm = NOTE_LINE_RE.match(l)
+        if nm and current is not None:
+            note_text = nm.group(1).strip()
+            if note_text:
+                current.note = (current.note + "\n" if current.note else "") + note_text
+            else:
+                current.note = current.note or ""
+            in_note = True
+            continue
+
+        
 
 
         # Otherwise it's highlight text
